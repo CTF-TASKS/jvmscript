@@ -4,7 +4,6 @@ import { writeFileSync } from 'fs'
 const cls = compile(`
   let test = '2'
   let a = '1'
-  const b = 123456
   print(a + test)
 `)
 let out = Buffer.alloc(8192)

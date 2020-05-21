@@ -20,6 +20,10 @@ enum ConstantKind {
   TAG_METHOD_TYPE = 16,
   TAG_INVOKE_DYNAMIC = 18,
 }
+enum AccessFlags {
+  Public = 1,
+  StaticPublic = 9,
+}
 
 type Constant = {
   kind: ConstantKind.TAG_UTF8
@@ -43,6 +47,11 @@ class ConstantPool {
   pool: Constant[] = []
   constructor () {}
   addString(str: string) {
+    const existed = this.pool.findIndex(i => i.kind === ConstantKind.TAG_UTF8 && i.str === str) + 1
+    if (existed) {
+      console.log('existed', str, existed)
+      return existed
+    }
     this.pool.push({
       kind: ConstantKind.TAG_UTF8,
       str
@@ -50,6 +59,10 @@ class ConstantPool {
     return this.pool.length
   }
   addNumber(num: number) {
+    const existed = this.pool.findIndex(i => i.kind === ConstantKind.TAG_DOUBLE && i.num === num) + 1
+    if (existed) {
+      return existed
+    }
     this.pool.push({
       kind: ConstantKind.TAG_DOUBLE,
       num
@@ -80,7 +93,7 @@ class ConstantPool {
     return this.pool.length
   }
   write(buffer: Buffer, offset: number = 8) {
-    offset = buffer.writeInt16BE(this.pool.length + 2, offset)
+    offset = buffer.writeInt16BE(this.pool.length + 1, offset)
     for (const c of this.pool) {
       offset = buffer.writeInt8(c.kind, offset)
       switch (c.kind) {
@@ -117,22 +130,79 @@ class ClassInfo {
   thisClass = 'Main'
   superClass = 'java/lang/Object'
   constructor() {}
+  objectConstructor(methodRef: number) {
+    const buf = Buffer.from([
+      0x2a, // aload_0
+      0xb7, // invokespecial method_ref
+      0x00, // methodRef
+      0x00,
+      0xB1, // return
+    ])
+    buf.writeUInt16BE(methodRef, 2)
+    return buf
+  }
+  makeCodeAttr(code: Buffer) {
+    const buf = Buffer.alloc(1024)
+    let offset = 0
+    offset = buf.writeUInt16BE(0x10, offset) // max stack
+    offset = buf.writeUInt16BE(0x10, offset) // max locals
+    offset = buf.writeUInt32BE(code.byteLength, offset) // code length
+    offset += code.copy(buf, offset) // code
+    offset = buf.writeUInt16BE(0, offset) // exception table length
+    offset = buf.writeUInt16BE(0, offset) // attr length
+    return buf.slice(0, offset)
+  }
+  makeMethodInfo(access: AccessFlags, name: string, description: string, code: Buffer) {
+    const buf = Buffer.alloc(1024)
+    let offset = 0
+    offset = buf.writeUInt16BE(access, offset) // access
+    offset = buf.writeUInt16BE(this.pool.addString(name), offset) // name
+    offset = buf.writeUInt16BE(this.pool.addString(description), offset) // description
+    offset = buf.writeUInt16BE(1, offset) // attr count
+
+    const codeAttr = this.makeCodeAttr(code)
+    offset = buf.writeUInt16BE(this.pool.addString('Code'), offset) // Code attribute
+    offset = buf.writeUInt32BE(codeAttr.byteLength, offset) // attr length
+    offset += codeAttr.copy(buf, offset)
+    return buf.slice(0, offset)
+  }
+  makeTemplate() {
+    const p = this.pool
+    const thisClass = p.addClass(p.addString(this.thisClass))
+    const superClass = p.addClass(p.addString(this.superClass))
+    const constructorNT = p.addNameAndType(p.addString('<init>'), p.addString('()V'))
+    const superRef = this.pool.addMethodRef(superClass, constructorNT)
+    const methodInfo = this.makeMethodInfo(AccessFlags.Public, '<init>', '()V', this.objectConstructor(superRef))
+
+    return {
+      thisClass,
+      superClass,
+      methodInfo
+    }
+  }
   write(buffer: Buffer) {
-    const thisClass = this.pool.addClass(this.pool.addString(this.thisClass))
-    const superClass = this.pool.addClass(this.pool.addString(this.superClass))
+    const {
+      thisClass,
+      superClass,
+      methodInfo,
+    } = this.makeTemplate()
+    const main = this.makeMethodInfo(AccessFlags.StaticPublic, 'main', '([Ljava/lang/String;)V', Buffer.from([0xB1, 0xB1]))
 
     let offset = 0
     offset = buffer.writeUInt32BE(0xcafebabe, offset)
     offset = buffer.writeInt16BE(0, offset)
-    offset = buffer.writeInt16BE(58, offset)
+    offset = buffer.writeInt16BE(45, offset)
     offset = this.pool.write(buffer, offset)
     offset = buffer.writeInt16BE(0x21, offset) // access flags: SUPER,PUBLIC
     offset = buffer.writeInt16BE(thisClass, offset) // this class
     offset = buffer.writeInt16BE(superClass, offset) // super class
     offset = buffer.writeInt16BE(0, offset) // interface count
     offset = buffer.writeInt16BE(0, offset) // fields count
-    offset = buffer.writeInt16BE(0, offset) // methods count
+    offset = buffer.writeInt16BE(2, offset) // methods count
     // methods
+    offset += methodInfo.copy(buffer, offset)
+    offset += main.copy(buffer, offset)
+    // methods end
     offset = buffer.writeInt16BE(0, offset) // attr count
 
     return offset
