@@ -42,6 +42,13 @@ type Constant = {
   kind: ConstantKind.TAG_NAME_AND_TYPE
   name_index: number
   description_index: number
+} | {
+  kind: ConstantKind.TAG_FIELD_REF
+  class_index: number
+  name_and_type_index: number
+} | {
+  kind: ConstantKind.TAG_STRING
+  string_index: number
 }
 class ConstantPool {
   pool: Constant[] = []
@@ -58,6 +65,17 @@ class ConstantPool {
     })
     return this.pool.length
   }
+  addStringObj(string_index: number) {
+    const existed = this.pool.findIndex(i => i.kind === ConstantKind.TAG_STRING && i.string_index === string_index) + 1
+    if (existed) {
+      return existed
+    }
+    this.pool.push({
+      kind: ConstantKind.TAG_STRING,
+      string_index
+    })
+    return this.pool.length
+  }
   addNumber(num: number) {
     const existed = this.pool.findIndex(i => i.kind === ConstantKind.TAG_DOUBLE && i.num === num) + 1
     if (existed) {
@@ -70,6 +88,10 @@ class ConstantPool {
     return this.pool.length
   }
   addClass(name_index: number) {
+    const existed = this.pool.findIndex(i => i.kind === ConstantKind.TAG_CLASS && i.name_index === name_index) + 1
+    if (existed) {
+      return existed
+    }
     this.pool.push({
       kind: ConstantKind.TAG_CLASS,
       name_index
@@ -77,6 +99,13 @@ class ConstantPool {
     return this.pool.length
   }
   addMethodRef(class_index: number, name_and_type_index: number) {
+    const existed = this.pool.findIndex(i => i.kind === ConstantKind.TAG_METHOD_REF
+      && i.class_index === class_index
+      && i.name_and_type_index === name_and_type_index
+    ) + 1
+    if (existed) {
+      return existed
+    }
     this.pool.push({
       kind: ConstantKind.TAG_METHOD_REF,
       class_index,
@@ -85,12 +114,49 @@ class ConstantPool {
     return this.pool.length
   }
   addNameAndType(name_index: number, description_index: number) {
+    const existed = this.pool.findIndex(i => i.kind === ConstantKind.TAG_NAME_AND_TYPE
+      && i.name_index === name_index
+      && i.description_index === description_index
+    ) + 1
+    if (existed) {
+      return existed
+    }
     this.pool.push({
       kind: ConstantKind.TAG_NAME_AND_TYPE,
       name_index,
       description_index
     })
     return this.pool.length
+  }
+  addFieldRef(class_index: number, name_and_type_index: number) {
+    const existed = this.pool.findIndex(i => i.kind === ConstantKind.TAG_FIELD_REF
+      && i.class_index === class_index
+      && i.name_and_type_index === name_and_type_index
+    ) + 1
+    if (existed) {
+      return existed
+    }
+    this.pool.push({
+      kind: ConstantKind.TAG_FIELD_REF,
+      class_index,
+      name_and_type_index
+    })
+    return this.pool.length
+  }
+  getMethodRef(cls: string, name: string, description: string) {
+    return this.addMethodRef(
+      this.addClass(this.addString(cls)),
+      this.addNameAndType(
+        this.addString(name),
+        this.addString(description)
+      )
+    )
+  }
+  getFieldRef(cls: string, name: string, description: string) {
+    return this.addFieldRef(
+      this.addClass(this.addString(cls)),
+      this.addNameAndType(this.addString(name), this.addString(description))
+    )
   }
   write(buffer: Buffer, offset: number = 8) {
     offset = buffer.writeInt16BE(this.pool.length + 1, offset)
@@ -114,6 +180,13 @@ class ConstantPool {
         case ConstantKind.TAG_NAME_AND_TYPE:
           offset = buffer.writeInt16BE(c.name_index, offset)
           offset = buffer.writeInt16BE(c.description_index, offset)
+          break
+        case ConstantKind.TAG_FIELD_REF:
+          offset = buffer.writeInt16BE(c.class_index, offset)
+          offset = buffer.writeInt16BE(c.name_and_type_index, offset)
+          break
+        case ConstantKind.TAG_STRING:
+          offset = buffer.writeInt16BE(c.string_index, offset)
           break
         default:
           // @ts-ignore
@@ -139,6 +212,24 @@ class ClassInfo {
       0xB1, // return
     ])
     buf.writeUInt16BE(methodRef, 2)
+    return buf
+  }
+  makePrint() {
+    const buf = Buffer.from([
+      0xB2, // getstatic
+      0, 0, // field ref
+      0x2A, // aload_0
+      0xB6, // invoke_virtual
+      0, 0, // method ref
+      0xB1, // return
+    ])
+    const p = this.pool
+    buf.writeUInt16BE(p.getFieldRef(
+      'java/lang/System', 'out', 'Ljava/io/PrintSystem;'
+    ), 1)
+    buf.writeUInt16BE(p.getMethodRef(
+      'java/io/PrintSystem', 'println', '(Ljava/lang/String;)V'
+    ), 5)
     return buf
   }
   makeCodeAttr(code: Buffer) {
@@ -172,35 +263,50 @@ class ClassInfo {
     const superClass = p.addClass(p.addString(this.superClass))
     const constructorNT = p.addNameAndType(p.addString('<init>'), p.addString('()V'))
     const superRef = this.pool.addMethodRef(superClass, constructorNT)
-    const methodInfo = this.makeMethodInfo(AccessFlags.Public, '<init>', '()V', this.objectConstructor(superRef))
+    const ctorMI = this.makeMethodInfo(AccessFlags.Public, '<init>', '()V', this.objectConstructor(superRef))
+    const printMI = this.makeMethodInfo(AccessFlags.StaticPublic, 'print', '(Ljava/lang/String;)V', this.objectConstructor(superRef))
 
     return {
       thisClass,
       superClass,
-      methodInfo
+      ctorMI,
+      printMI,
     }
   }
   write(buffer: Buffer) {
     const {
       thisClass,
       superClass,
-      methodInfo,
+      ctorMI,
+      printMI,
     } = this.makeTemplate()
-    const main = this.makeMethodInfo(AccessFlags.StaticPublic, 'main', '([Ljava/lang/String;)V', Buffer.from([0xB1, 0xB1]))
+    const mainCode = Buffer.from([
+      0x12, // ldc
+      0, // index
+      0xB8, // invoke_static
+      0, 0, // method ref
+      0xB1, // return
+    ])
+    mainCode.writeInt8(this.pool.addStringObj(this.pool.addString('Hello world')), 1)
+    mainCode.writeInt16BE(this.pool.getMethodRef(
+      'Main', 'print', '(Ljava/lang/String;)V'
+    ), 3)
+    const main = this.makeMethodInfo(AccessFlags.StaticPublic, 'main', '([Ljava/lang/String;)V', mainCode)
 
     let offset = 0
     offset = buffer.writeUInt32BE(0xcafebabe, offset)
     offset = buffer.writeInt16BE(0, offset)
-    offset = buffer.writeInt16BE(45, offset)
+    offset = buffer.writeInt16BE(55, offset)
     offset = this.pool.write(buffer, offset)
     offset = buffer.writeInt16BE(0x21, offset) // access flags: SUPER,PUBLIC
     offset = buffer.writeInt16BE(thisClass, offset) // this class
     offset = buffer.writeInt16BE(superClass, offset) // super class
     offset = buffer.writeInt16BE(0, offset) // interface count
     offset = buffer.writeInt16BE(0, offset) // fields count
-    offset = buffer.writeInt16BE(2, offset) // methods count
+    offset = buffer.writeInt16BE(3, offset) // methods count
     // methods
-    offset += methodInfo.copy(buffer, offset)
+    offset += ctorMI.copy(buffer, offset)
+    offset += printMI.copy(buffer, offset)
     offset += main.copy(buffer, offset)
     // methods end
     offset = buffer.writeInt16BE(0, offset) // attr count
