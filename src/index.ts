@@ -5,7 +5,7 @@ const cls = compile(`
   let test = '2'
   let a = '1'
   const b = 123456
-  print(a + shit)
+  print(a + test)
 `)
 let out = Buffer.alloc(8192)
 const size = cls.write(out)
