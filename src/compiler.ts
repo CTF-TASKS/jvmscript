@@ -225,10 +225,10 @@ class ClassInfo {
     ])
     const p = this.pool
     buf.writeUInt16BE(p.getFieldRef(
-      'java/lang/System', 'out', 'Ljava/io/PrintSystem;'
+      'java/lang/System', 'out', 'Ljava/io/PrintStream;'
     ), 1)
     buf.writeUInt16BE(p.getMethodRef(
-      'java/io/PrintSystem', 'println', '(Ljava/lang/String;)V'
+      'java/io/PrintStream', 'println', '(Ljava/lang/String;)V'
     ), 5)
     return buf
   }
@@ -264,7 +264,7 @@ class ClassInfo {
     const constructorNT = p.addNameAndType(p.addString('<init>'), p.addString('()V'))
     const superRef = this.pool.addMethodRef(superClass, constructorNT)
     const ctorMI = this.makeMethodInfo(AccessFlags.Public, '<init>', '()V', this.objectConstructor(superRef))
-    const printMI = this.makeMethodInfo(AccessFlags.StaticPublic, 'print', '(Ljava/lang/String;)V', this.objectConstructor(superRef))
+    const printMI = this.makeMethodInfo(AccessFlags.StaticPublic, 'print', '(Ljava/lang/String;)V', this.makePrint())
 
     return {
       thisClass,
