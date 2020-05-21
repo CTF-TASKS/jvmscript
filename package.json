@@ -1,0 +1,20 @@
+{
+  "name": "jvmscript",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "watch": "tsc -p . -w",
+    "build": "tsc -p .",
+    "start": "node dist/index.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@types/node": "^14.0.4",
+    "jvm": "^0.5.3",
+    "tmp-promise": "^3.0.2",
+    "typescript": "^3.9.3"
+  }
+}
