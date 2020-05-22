@@ -1,4 +1,4 @@
-import { createSourceFile, ScriptTarget, SyntaxKind, VariableStatement, Node, Identifier, StringLiteral, NumericLiteral } from 'typescript'
+import { createSourceFile, ScriptTarget, SyntaxKind, VariableStatement, Node, Identifier, StringLiteral, NumericLiteral, ExpressionStatement, CallExpression } from 'typescript'
 import { readFile as readFileAsync } from 'fs'
 import { equal } from 'assert'
 import { promisify } from 'util'
@@ -56,7 +56,6 @@ class ConstantPool {
   addString(str: string) {
     const existed = this.pool.findIndex(i => i.kind === ConstantKind.TAG_UTF8 && i.str === str) + 1
     if (existed) {
-      console.log('existed', str, existed)
       return existed
     }
     this.pool.push({
@@ -202,6 +201,7 @@ class ClassInfo {
   pool = new ConstantPool()
   thisClass = 'Main'
   superClass = 'java/lang/Object'
+  template = this.makeTemplate()
   constructor() {}
   objectConstructor(methodRef: number) {
     const buf = Buffer.from([
@@ -279,7 +279,7 @@ class ClassInfo {
       superClass,
       ctorMI,
       printMI,
-    } = this.makeTemplate()
+    } = this.template
     const mainCode = Buffer.from([
       0x12, // ldc
       0, // index
@@ -292,6 +292,7 @@ class ClassInfo {
       'Main', 'print', '(Ljava/lang/String;)V'
     ), 3)
     const main = this.makeMethodInfo(AccessFlags.StaticPublic, 'main', '([Ljava/lang/String;)V', mainCode)
+    const methods: Buffer[] = [ctorMI, printMI, main]
 
     let offset = 0
     offset = buffer.writeUInt32BE(0xcafebabe, offset)
@@ -303,11 +304,11 @@ class ClassInfo {
     offset = buffer.writeInt16BE(superClass, offset) // super class
     offset = buffer.writeInt16BE(0, offset) // interface count
     offset = buffer.writeInt16BE(0, offset) // fields count
-    offset = buffer.writeInt16BE(3, offset) // methods count
+    offset = buffer.writeInt16BE(methods.length, offset) // methods count
     // methods
-    offset += ctorMI.copy(buffer, offset)
-    offset += printMI.copy(buffer, offset)
-    offset += main.copy(buffer, offset)
+    for (const m of  methods) {
+      offset += m.copy(buffer, offset)
+    }
     // methods end
     offset = buffer.writeInt16BE(0, offset) // attr count
 
@@ -328,6 +329,7 @@ function getLiteral(node?: Node) {
 
 export function compile(source: string) {
   const sourceFile = createSourceFile('main.ts', source, ScriptTarget.ES2020)
+  const code = Buffer.alloc(8192)
   const cls = new ClassInfo()
   const varConst = new Map()
 
@@ -351,6 +353,19 @@ export function compile(source: string) {
         }
         varConst.set(name, id)
       }
+    } else if (i.kind === SyntaxKind.ExpressionStatement) {
+      const e = (i as ExpressionStatement).expression
+      if (e.kind === SyntaxKind.CallExpression) {
+        const c = e as CallExpression
+        equal(c.expression.kind, SyntaxKind.Identifier)
+        const func = (c.expression as Identifier).escapedText
+        const args = c.arguments.map(getLiteral)
+        console.log(func, args)
+      } else {
+        throw new TypeError(`Unsupported kind: ${SyntaxKind[i.kind]}(${i.kind})`)
+      }
+    } else {
+      throw new TypeError(`Unsupported kind: ${SyntaxKind[i.kind]}(${i.kind})`)
     }
   }
   return cls
