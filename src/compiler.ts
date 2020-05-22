@@ -158,34 +158,34 @@ class ConstantPool {
     )
   }
   write(buffer: Buffer, offset: number = 8) {
-    offset = buffer.writeInt16BE(this.pool.length + 1, offset)
+    offset = buffer.writeUInt16BE(this.pool.length + 1, offset)
     for (const c of this.pool) {
-      offset = buffer.writeInt8(c.kind, offset)
+      offset = buffer.writeUInt8(c.kind, offset)
       switch (c.kind) {
         case ConstantKind.TAG_UTF8:
-          offset = buffer.writeInt16BE(c.str.length, offset)
+          offset = buffer.writeUInt16BE(c.str.length, offset)
           offset += buffer.write(c.str, offset, 'utf8')
           break
         case ConstantKind.TAG_DOUBLE:
           offset = buffer.writeDoubleBE(c.num, offset)
           break
         case ConstantKind.TAG_CLASS:
-          offset = buffer.writeInt16BE(c.name_index, offset)
+          offset = buffer.writeUInt16BE(c.name_index, offset)
           break
         case ConstantKind.TAG_METHOD_REF:
-          offset = buffer.writeInt16BE(c.class_index, offset)
-          offset = buffer.writeInt16BE(c.name_and_type_index, offset)
+          offset = buffer.writeUInt16BE(c.class_index, offset)
+          offset = buffer.writeUInt16BE(c.name_and_type_index, offset)
           break
         case ConstantKind.TAG_NAME_AND_TYPE:
-          offset = buffer.writeInt16BE(c.name_index, offset)
-          offset = buffer.writeInt16BE(c.description_index, offset)
+          offset = buffer.writeUInt16BE(c.name_index, offset)
+          offset = buffer.writeUInt16BE(c.description_index, offset)
           break
         case ConstantKind.TAG_FIELD_REF:
-          offset = buffer.writeInt16BE(c.class_index, offset)
-          offset = buffer.writeInt16BE(c.name_and_type_index, offset)
+          offset = buffer.writeUInt16BE(c.class_index, offset)
+          offset = buffer.writeUInt16BE(c.name_and_type_index, offset)
           break
         case ConstantKind.TAG_STRING:
-          offset = buffer.writeInt16BE(c.string_index, offset)
+          offset = buffer.writeUInt16BE(c.string_index, offset)
           break
         default:
           // @ts-ignore
@@ -201,6 +201,7 @@ class ClassInfo {
   pool = new ConstantPool()
   thisClass = 'Main'
   superClass = 'java/lang/Object'
+  main?: Buffer
   template = this.makeTemplate()
   constructor() {}
   objectConstructor(methodRef: number) {
@@ -274,45 +275,63 @@ class ClassInfo {
     }
   }
   write(buffer: Buffer) {
+    if (!this.main) {
+      throw new TypeError(`Main code is not set`)
+    }
     const {
       thisClass,
       superClass,
       ctorMI,
       printMI,
     } = this.template
-    const mainCode = Buffer.from([
-      0x12, // ldc
-      0, // index
-      0xB8, // invoke_static
-      0, 0, // method ref
-      0xB1, // return
-    ])
-    mainCode.writeInt8(this.pool.addStringObj(this.pool.addString('Hello world')), 1)
-    mainCode.writeInt16BE(this.pool.getMethodRef(
-      'Main', 'print', '(Ljava/lang/String;)V'
-    ), 3)
-    const main = this.makeMethodInfo(AccessFlags.StaticPublic, 'main', '([Ljava/lang/String;)V', mainCode)
+    const main = this.makeMethodInfo(AccessFlags.StaticPublic, 'main', '([Ljava/lang/String;)V', this.main)
     const methods: Buffer[] = [ctorMI, printMI, main]
 
     let offset = 0
     offset = buffer.writeUInt32BE(0xcafebabe, offset)
-    offset = buffer.writeInt16BE(0, offset)
-    offset = buffer.writeInt16BE(55, offset)
+    offset = buffer.writeUInt16BE(0, offset)
+    offset = buffer.writeUInt16BE(55, offset)
     offset = this.pool.write(buffer, offset)
-    offset = buffer.writeInt16BE(0x21, offset) // access flags: SUPER,PUBLIC
-    offset = buffer.writeInt16BE(thisClass, offset) // this class
-    offset = buffer.writeInt16BE(superClass, offset) // super class
-    offset = buffer.writeInt16BE(0, offset) // interface count
-    offset = buffer.writeInt16BE(0, offset) // fields count
-    offset = buffer.writeInt16BE(methods.length, offset) // methods count
+    offset = buffer.writeUInt16BE(0x21, offset) // access flags: SUPER,PUBLIC
+    offset = buffer.writeUInt16BE(thisClass, offset) // this class
+    offset = buffer.writeUInt16BE(superClass, offset) // super class
+    offset = buffer.writeUInt16BE(0, offset) // interface count
+    offset = buffer.writeUInt16BE(0, offset) // fields count
+    offset = buffer.writeUInt16BE(methods.length, offset) // methods count
     // methods
     for (const m of  methods) {
       offset += m.copy(buffer, offset)
     }
     // methods end
-    offset = buffer.writeInt16BE(0, offset) // attr count
+    offset = buffer.writeUInt16BE(0, offset) // attr count
 
     return offset
+  }
+}
+
+class Assembler {
+  private offset = 0
+  private p = this.cls.pool
+  constructor (private buf: Buffer, private cls: ClassInfo) {}
+  declareVariable(varIndex: number, index: number) {
+    this.offset = this.buf.writeUInt8(0x13, this.offset) // ldc_w
+    this.offset = this.buf.writeUInt16BE(index, this.offset)
+    this.offset = this.buf.writeUInt8(0x3a, this.offset) // astore
+    this.offset = this.buf.writeUInt8(varIndex, this.offset)
+  }
+  callPrint(varIndex: number) {
+    this.offset = this.buf.writeUInt8(0x19, this.offset) // aload
+    this.offset = this.buf.writeUInt8(varIndex, this.offset)
+    this.offset = this.buf.writeUInt8(0xB8, this.offset) // invokestatic
+    this.offset = this.buf.writeUInt16BE(this.p.getMethodRef(
+      'Main', 'print', '(Ljava/lang/String;)V'
+    ), this.offset)
+  }
+  end() {
+    this.offset = this.buf.writeUInt8(0xB1, this.offset) // return
+  }
+  getBuf() {
+    return this.buf.slice(0, this.offset)
   }
 }
 
@@ -328,10 +347,21 @@ function getLiteral(node?: Node) {
 }
 
 export function compile(source: string) {
+  type Variable = ({
+    type: 'string'
+    value: string
+  } | {
+    type: 'number'
+    value: number
+  }) & {
+    name: string
+  }
   const sourceFile = createSourceFile('main.ts', source, ScriptTarget.ES2020)
-  const code = Buffer.alloc(8192)
   const cls = new ClassInfo()
-  const varConst = new Map()
+  const asm = new Assembler(Buffer.alloc(8192), cls)
+  const p = cls.pool
+  const vars: Variable[] = []
+  const varIndexByName = (name: string) => vars.findIndex(i => i.name === name)
 
   for (const i of sourceFile.statements) {
     if (i.kind === SyntaxKind.VariableStatement) {
@@ -340,18 +370,30 @@ export function compile(source: string) {
       for (const decl of s.declarationList.declarations) {
         equal(decl.kind, SyntaxKind.VariableDeclaration)
         equal(decl.name.kind, SyntaxKind.Identifier)
-        const name = (decl.name as Identifier).escapedText
+        const name = (decl.name as Identifier).escapedText as string
         const value = getLiteral(decl.initializer)
 
         console.log('decl', name, value)
 
-        let id: number
         if (typeof value === 'number') {
-          id = cls.pool.addNumber(value)
+          asm.declareVariable(vars.length, p.addNumber(value))
+          vars.push({
+            name,
+            type: 'number',
+            value
+          })
+        } else if (typeof value === 'string') {
+          asm.declareVariable(vars.length, p.addStringObj(
+            p.addString(value)
+          ))
+          vars.push({
+            name,
+            type: 'string',
+            value
+          })
         } else {
-          id = cls.pool.addString(value)
+          throw new TypeError(`Wrong type: ${typeof value}`)
         }
-        varConst.set(name, id)
       }
     } else if (i.kind === SyntaxKind.ExpressionStatement) {
       const e = (i as ExpressionStatement).expression
@@ -359,8 +401,22 @@ export function compile(source: string) {
         const c = e as CallExpression
         equal(c.expression.kind, SyntaxKind.Identifier)
         const func = (c.expression as Identifier).escapedText
-        const args = c.arguments.map(getLiteral)
-        console.log(func, args)
+        const args = c.arguments
+        if (func !== 'print') {
+          throw new TypeError(`Only print is allowed to be called`)
+        }
+        if (args.length !== 1) {
+          throw new TypeError(`Only print only accept one variable`)
+        }
+        const arg = args[0]
+        if (arg.kind !== SyntaxKind.Identifier) {
+          throw new TypeError(`Print only support variable`)
+        }
+        const idx = varIndexByName((arg as Identifier).escapedText as string)
+        if (idx === -1) {
+          throw new TypeError(`Variable is not found`)
+        }
+        asm.callPrint(idx)
       } else {
         throw new TypeError(`Unsupported kind: ${SyntaxKind[i.kind]}(${i.kind})`)
       }
@@ -368,5 +424,18 @@ export function compile(source: string) {
       throw new TypeError(`Unsupported kind: ${SyntaxKind[i.kind]}(${i.kind})`)
     }
   }
+  asm.end()
+  cls.main = asm.getBuf()
+  // const mainCode = Buffer.from([
+  //   0x12, // ldc
+  //   0, // index
+  //   0xB8, // invoke_static
+  //   0, 0, // method ref
+  //   0xB1, // return
+  // ])
+  // mainCode.writeUInt8(this.pool.addStringObj(this.pool.addString('Hello world')), 1)
+  // mainCode.writeUInt16BE(this.pool.getMethodRef(
+  //   'Main', 'print', '(Ljava/lang/String;)V'
+  // ), 3)
   return cls
 }

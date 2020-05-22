@@ -2,9 +2,9 @@ import { compile } from './compiler'
 import { writeFileSync } from 'fs'
 
 const cls = compile(`
-  let test = '2'
   let a = '1'
-  print('hello world')
+  let test = 'hello worldasdf'
+  print(test)
 `)
 let out = Buffer.alloc(8192)
 const size = cls.write(out)
