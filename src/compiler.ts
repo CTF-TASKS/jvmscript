@@ -1,4 +1,4 @@
-import { createSourceFile, ScriptTarget, SyntaxKind, VariableStatement, Node, Identifier, StringLiteral, NumericLiteral, ExpressionStatement, CallExpression } from 'typescript'
+import { createSourceFile, ScriptTarget, SyntaxKind, VariableStatement, Node, Identifier, StringLiteral, NumericLiteral, ExpressionStatement, CallExpression, Expression, BinaryExpression } from 'typescript'
 import { readFile as readFileAsync } from 'fs'
 import { equal } from 'assert'
 import { promisify } from 'util'
@@ -313,22 +313,52 @@ class Assembler {
   private offset = 0
   private p = this.cls.pool
   constructor (private buf: Buffer, private cls: ClassInfo) {}
-  declareVariable(varIndex: number, index: number) {
+  pushConstant(index: number) {
     this.offset = this.buf.writeUInt8(0x13, this.offset) // ldc_w
     this.offset = this.buf.writeUInt16BE(index, this.offset)
+  }
+  pushVariable(varIndex: number) {
+    this.offset = this.buf.writeUInt8(0x19, this.offset) // aload
+    this.offset = this.buf.writeUInt8(varIndex, this.offset)
+  }
+  astore(varIndex: number) {
     this.offset = this.buf.writeUInt8(0x3a, this.offset) // astore
     this.offset = this.buf.writeUInt8(varIndex, this.offset)
+  }
+  invokestatic(cls: string, method: string, description: string) {
+    this.offset = this.buf.writeUInt8(0xB8, this.offset) // invokestatic
+    this.offset = this.buf.writeUInt16BE(this.p.getMethodRef(
+      cls, method, description
+    ), this.offset)
+  }
+  invokevirtual(cls: string, method: string, description: string) {
+    this.offset = this.buf.writeUInt8(0xB6, this.offset) // invokevirtual
+    this.offset = this.buf.writeUInt16BE(this.p.getMethodRef(
+      cls, method, description
+    ), this.offset)
+  }
+  swap() {
+    this.offset = this.buf.writeUInt8(0x5F, this.offset) // swap
   }
   callPrint(varIndex: number) {
     this.offset = this.buf.writeUInt8(0x19, this.offset) // aload
     this.offset = this.buf.writeUInt8(varIndex, this.offset)
-    this.offset = this.buf.writeUInt8(0xB8, this.offset) // invokestatic
-    this.offset = this.buf.writeUInt16BE(this.p.getMethodRef(
-      'Main', 'print', '(Ljava/lang/String;)V'
+    this.invokestatic('Main', 'print', '(Ljava/lang/String;)V')
+  }
+  newObj(cls: string) {
+    this.offset = this.buf.writeUInt8(0xBB, this.offset)
+    this.offset = this.buf.writeUInt16BE(this.p.addClass(
+      this.p.addString(cls)
     ), this.offset)
+  }
+  pop() {
+    this.offset = this.buf.writeUInt8(0x57, this.offset) // pop
   }
   end() {
     this.offset = this.buf.writeUInt8(0xB1, this.offset) // return
+  }
+  addi() {
+    this.offset = this.buf.writeUInt8(0x60, this.offset) // iadd
   }
   getBuf() {
     return this.buf.slice(0, this.offset)
@@ -346,13 +376,16 @@ function getLiteral(node?: Node) {
   }
 }
 
+enum StackType {
+  Number,
+  String,
+  Void,
+}
 export function compile(source: string) {
   type Variable = ({
-    type: 'string'
-    value: string
+    type: StackType.String
   } | {
-    type: 'number'
-    value: number
+    type: StackType.Number
   }) & {
     name: string
   }
@@ -362,6 +395,73 @@ export function compile(source: string) {
   const p = cls.pool
   const vars: Variable[] = []
   const varIndexByName = (name: string) => vars.findIndex(i => i.name === name)
+  const varType = (name: string) => vars[varIndexByName(name)].type
+  const pushExpression = (expression: Expression): StackType => {
+    const kind = expression.kind
+    if (kind === SyntaxKind.Identifier) {
+      const e = expression as Identifier
+      const idx = varIndexByName(e.escapedText as string)
+      asm.pushVariable(idx)
+      return vars[idx].type
+    } else if (kind === SyntaxKind.StringLiteral) {
+      const e = expression as StringLiteral
+      asm.pushConstant(p.addStringObj(p.addString(e.text)))
+      return StackType.String
+    } else if (kind === SyntaxKind.NumericLiteral) {
+      const e = expression as NumericLiteral
+      asm.pushConstant(p.addStringObj(p.addNumber(parseFloat(e.text))))
+      return StackType.Number
+    } else if (kind === SyntaxKind.BinaryExpression) {
+      const e = expression as BinaryExpression
+      const lt = pushExpression(e.left)
+      const rt = pushExpression(e.right)
+      const op = e.operatorToken
+      if (op.kind === SyntaxKind.EqualsToken) {
+        equal(e.left.kind, SyntaxKind.Identifier)
+        const varIdx = varIndexByName((e.left as Identifier).escapedText as string)
+        asm.astore(varIdx)
+        return StackType.Void
+      } else if (op.kind === SyntaxKind.PlusToken) {
+        if (lt === rt) {
+          if (lt === StackType.Number) {
+            asm.addi()
+            return StackType.Number
+          } else if (lt === StackType.String) {
+            asm.invokevirtual('java/lang/String', 'concat', '(Ljava/lang/String;)Ljava/lang/String;')
+            return StackType.String
+          }
+        } else {
+          throw new Error('Wrong type to add')
+        }
+      } else {
+        throw new Error(`Operator not supported: ${SyntaxKind[op.kind]}`)
+      }
+      throw new Error('Impossible')
+    } else if (kind === SyntaxKind.CallExpression) {
+      const c = expression as CallExpression
+      equal(c.expression.kind, SyntaxKind.Identifier)
+      const func = (c.expression as Identifier).escapedText
+      const args = c.arguments
+      if (func !== 'print') {
+        throw new TypeError(`Only print is allowed to be called`)
+      }
+      if (args.length !== 1) {
+        throw new TypeError(`Only print only accept one variable`)
+      }
+      const arg = args[0]
+      if (arg.kind !== SyntaxKind.Identifier) {
+        throw new TypeError(`Print only support variable`)
+      }
+      const idx = varIndexByName((arg as Identifier).escapedText as string)
+      if (idx === -1) {
+        throw new TypeError(`Variable is not found`)
+      }
+      asm.callPrint(idx)
+      return StackType.Void
+    } else {
+      throw new TypeError(`Unsupported kind: ${SyntaxKind[kind]}(${kind})`)
+    }
+  }
 
   for (const i of sourceFile.statements) {
     if (i.kind === SyntaxKind.VariableStatement) {
@@ -371,54 +471,22 @@ export function compile(source: string) {
         equal(decl.kind, SyntaxKind.VariableDeclaration)
         equal(decl.name.kind, SyntaxKind.Identifier)
         const name = (decl.name as Identifier).escapedText as string
-        const value = getLiteral(decl.initializer)
-
-        console.log('decl', name, value)
-
-        if (typeof value === 'number') {
-          asm.declareVariable(vars.length, p.addNumber(value))
-          vars.push({
-            name,
-            type: 'number',
-            value
-          })
-        } else if (typeof value === 'string') {
-          asm.declareVariable(vars.length, p.addStringObj(
-            p.addString(value)
-          ))
-          vars.push({
-            name,
-            type: 'string',
-            value
-          })
-        } else {
-          throw new TypeError(`Wrong type: ${typeof value}`)
+        if (!decl.initializer) {
+          throw new TypeError(`Must have initializer`)
         }
+        const value = pushExpression(decl.initializer)
+
+        asm.astore(vars.length)
+        vars.push({
+          name,
+          type: value as (StackType.Number | StackType.String),
+        })
       }
     } else if (i.kind === SyntaxKind.ExpressionStatement) {
       const e = (i as ExpressionStatement).expression
-      if (e.kind === SyntaxKind.CallExpression) {
-        const c = e as CallExpression
-        equal(c.expression.kind, SyntaxKind.Identifier)
-        const func = (c.expression as Identifier).escapedText
-        const args = c.arguments
-        if (func !== 'print') {
-          throw new TypeError(`Only print is allowed to be called`)
-        }
-        if (args.length !== 1) {
-          throw new TypeError(`Only print only accept one variable`)
-        }
-        const arg = args[0]
-        if (arg.kind !== SyntaxKind.Identifier) {
-          throw new TypeError(`Print only support variable`)
-        }
-        const idx = varIndexByName((arg as Identifier).escapedText as string)
-        if (idx === -1) {
-          throw new TypeError(`Variable is not found`)
-        }
-        asm.callPrint(idx)
-      } else {
-        throw new TypeError(`Unsupported kind: ${SyntaxKind[i.kind]}(${i.kind})`)
+      const t = pushExpression(e)
+      if (t !== StackType.Void) {
+        asm.pop()
       }
     } else {
       throw new TypeError(`Unsupported kind: ${SyntaxKind[i.kind]}(${i.kind})`)
