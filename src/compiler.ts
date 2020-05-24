@@ -365,17 +365,6 @@ class Assembler {
   }
 }
 
-function getLiteral(node?: Node) {
-  if (typeof node === 'undefined') throw new TypeError('Variable must be initialized')
-  if (node.kind === SyntaxKind.StringLiteral) {
-    return (node as StringLiteral).text
-  } else if (node.kind === SyntaxKind.NumericLiteral) {
-    return parseFloat((node as NumericLiteral).text)
-  } else {
-    throw new TypeError(`Initializer ${node.kind} is not supported`)
-  }
-}
-
 enum StackType {
   Number,
   String,
@@ -494,16 +483,6 @@ export function compile(source: string) {
   }
   asm.end()
   cls.main = asm.getBuf()
-  // const mainCode = Buffer.from([
-  //   0x12, // ldc
-  //   0, // index
-  //   0xB8, // invoke_static
-  //   0, 0, // method ref
-  //   0xB1, // return
-  // ])
-  // mainCode.writeUInt8(this.pool.addStringObj(this.pool.addString('Hello world')), 1)
-  // mainCode.writeUInt16BE(this.pool.getMethodRef(
-  //   'Main', 'print', '(Ljava/lang/String;)V'
-  // ), 3)
+
   return cls
 }
