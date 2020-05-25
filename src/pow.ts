@@ -20,7 +20,7 @@ function generateChallenge(difficulty: number = 0.7) {
   const p = Math.floor(full.length * difficulty)
   const [display, hidden] = [full.slice(0, p), full.slice(p)]
   return [
-    `sha256('${display}' + '${'?'.repeat(hidden.length)}') == ${sha256(full)}`,
+    `sha256('${display}' + '${'?'.repeat(hidden.length)}') == '${sha256(full)}'`,
     hidden
   ] as const
 }

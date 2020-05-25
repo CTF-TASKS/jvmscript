@@ -29,6 +29,9 @@ async function onConnection(socket: Socket, dir: DirectoryResult) {
   await socket.writeline(`Welcome to c0 online demo!`)
   await socket.writeline(`Zero-featured TypeScript on JVM\n`)
   await socket.writeline(`You can input your code and see the result!`)
+  await socket.writeline(`For example:
+print('hello world')
+`)
   await socket.writeline(`Code(end with empty line):`)
   const code = []
   for (let i = 0; i < 50; i++) {
