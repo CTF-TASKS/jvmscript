@@ -7,7 +7,7 @@ export function createServer(cb: (socket: Socket) => void) {
 
 export class Socket {
   private rl: Interface
-  constructor (private s: NativeSocket) {
+  constructor (public s: NativeSocket) {
     this.rl = createInterface(s)
   }
   writeline(data: string) {

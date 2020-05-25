@@ -25,14 +25,14 @@ function generateChallenge(difficulty: number = 0.7) {
   ] as const
 }
 
-export function checkPow(next: (socket: Socket) => void) {
+export function checkPow(next: (socket: Socket) => Promise<void>) {
   return async (socket: Socket) => {
     const [ challenge, hidden ] = generateChallenge()
     console.log('challenge', challenge, hidden)
     await socket.writeline(challenge)
     const ans = await socket.readline()
     if (hidden === ans) {
-      next(socket)
+      return next(socket)
     } else {
       await socket.writeline(`Wrong answer, the answer is ${hidden}`)
       await socket.close()
