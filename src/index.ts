@@ -58,22 +58,19 @@ async function onConnection(socket: Socket, dir: DirectoryResult) {
         [CodeLocation]: {}
       },
       HostConfig: {
-        Binds: [`${dir.path}:${CodeLocation}`]
-      }
+        Binds: [`${dir.path}:${CodeLocation}`],
+        AutoRemove: true
+      },
     })
-    try {
-      const stream = await c.attach({
-        stream: true,
-        stdout: true,
-        stderr: true,
-      })
-      await c.start()
-      await c.wait()
-      await socket.writeline('Result:')
-      await socket.writeline(await getStream(stream))
-    } finally {
-      await c.remove()
-    }
+    const stream = await c.attach({
+      stream: true,
+      stdout: true,
+      stderr: true,
+    })
+    await c.start()
+    await c.wait()
+    await socket.writeline('Result:')
+    await socket.writeline(await getStream(stream))
   })
   await socket.writeline('Bye!')
 }
@@ -97,7 +94,11 @@ function asyncWrapper(cb: (socket: Socket) => Promise<void>) {
 
 async function main() {
   try {
-    await docker.run(DockerTag, ['java', '-version'], process.stdout)
+    await docker.run(DockerTag, ['java', '-version'], process.stdout, {
+      HostConfig: {
+        AutoRemove: true
+      }
+    })
   } catch (e) {
     console.log('Pulling docker image')
     await docker.pull(DockerTag, {})
