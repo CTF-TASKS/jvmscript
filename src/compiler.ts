@@ -379,7 +379,6 @@ export function compile(source: string) {
   const p = cls.pool
   const vars: Variable[] = []
   const varIndexByName = (name: string) => vars.findIndex(i => i.name === name)
-  const varType = (name: string) => vars[varIndexByName(name)].type
   const pushExpression = (expression: Expression): StackType => {
     const kind = expression.kind
     if (kind === SyntaxKind.Identifier) {
@@ -430,7 +429,7 @@ export function compile(source: string) {
         throw new TypeError(`Only print is allowed to be called`)
       }
       if (args.length !== 1) {
-        throw new TypeError(`Only print only accept one variable`)
+        throw new TypeError(`print only accept a string`)
       }
       const arg = args[0]
       const type = pushExpression(arg)
