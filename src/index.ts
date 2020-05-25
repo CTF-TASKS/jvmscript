@@ -5,13 +5,25 @@ import { checkPow } from './pow'
 import { withDir, DirectoryResult } from 'tmp-promise'
 import { promisify } from 'util'
 import { join } from 'path'
+import { Stream } from 'stream'
 import pLimit from 'p-limit'
 import Docker from 'dockerode'
 
+const CodeLocation = '/data'
 const DockerTag = 'openjdk:8-alpine'
 const limit = pLimit(5)
 const docker = new Docker()
 const writeFile = promisify(writeFileAsync)
+
+function getStream(stream: Stream) {
+  return new Promise<string>((resolve, reject) => {
+    let out: Buffer[] = []
+    const end = () => resolve(Buffer.concat(out).toString())
+    stream.on('data', buf => out.push(buf))
+    stream.on('end', end)
+    stream.on('error', err => reject(err))
+  })
+}
 
 async function onConnection(socket: Socket, dir: DirectoryResult) {
   await socket.writeline(`Welcome to c0 online demo!`)
@@ -37,7 +49,31 @@ async function onConnection(socket: Socket, dir: DirectoryResult) {
   }
   await limit(async () => {
     await socket.writeline('Running...')
-    await docker.run('openjdk:8-alpine', ['java', '--version'], socket.s)
+    const c = await docker.createContainer({
+      Image: DockerTag,
+      Cmd: ['java', 'Main'],
+      Env: [`FLAG=${process.env.FLAG}`],
+      WorkingDir: CodeLocation,
+      Volumes: {
+        [CodeLocation]: {}
+      },
+      HostConfig: {
+        Binds: [`${dir.path}:${CodeLocation}`]
+      }
+    })
+    try {
+      const stream = await c.attach({
+        stream: true,
+        stdout: true,
+        stderr: true,
+      })
+      await c.start()
+      await c.wait()
+      await socket.writeline('Result:')
+      await socket.writeline(await getStream(stream))
+    } finally {
+      await c.remove()
+    }
   })
   await socket.writeline('Bye!')
 }

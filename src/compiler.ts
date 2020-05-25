@@ -290,7 +290,7 @@ class ClassInfo {
     let offset = 0
     offset = buffer.writeUInt32BE(0xcafebabe, offset)
     offset = buffer.writeUInt16BE(0, offset)
-    offset = buffer.writeUInt16BE(55, offset)
+    offset = buffer.writeUInt16BE(52, offset)
     offset = this.pool.write(buffer, offset)
     offset = buffer.writeUInt16BE(0x21, offset) // access flags: SUPER,PUBLIC
     offset = buffer.writeUInt16BE(thisClass, offset) // this class
@@ -340,9 +340,7 @@ class Assembler {
   swap() {
     this.offset = this.buf.writeUInt8(0x5F, this.offset) // swap
   }
-  callPrint(varIndex: number) {
-    this.offset = this.buf.writeUInt8(0x19, this.offset) // aload
-    this.offset = this.buf.writeUInt8(varIndex, this.offset)
+  callPrint() {
     this.invokestatic('Main', 'print', '(Ljava/lang/String;)V')
   }
   newObj(cls: string) {
@@ -438,14 +436,11 @@ export function compile(source: string) {
         throw new TypeError(`Only print only accept one variable`)
       }
       const arg = args[0]
-      if (arg.kind !== SyntaxKind.Identifier) {
-        throw new TypeError(`Print only support variable`)
+      const type = pushExpression(arg)
+      if (type !== StackType.String) {
+        throw new TypeError(`print only accept a string`)
       }
-      const idx = varIndexByName((arg as Identifier).escapedText as string)
-      if (idx === -1) {
-        throw new TypeError(`Variable is not found`)
-      }
-      asm.callPrint(idx)
+      asm.callPrint()
       return StackType.Void
     } else {
       throw new TypeError(`Unsupported kind: ${SyntaxKind[kind]}(${kind})`)
