@@ -57,6 +57,9 @@ print('hello world')
       Env: [`FLAG=${process.env.FLAG}`],
       WorkingDir: CodeLocation,
       Tty: true,
+      HostConfig: {
+        AutoRemove: true
+      },
     })
     await c.putArchive(tar, { path: CodeLocation })
     const stream = await c.attach({
