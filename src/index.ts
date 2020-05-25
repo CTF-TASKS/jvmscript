@@ -1,11 +1,8 @@
 import { compile } from './compiler'
-import { writeFile as writeFileAsync } from 'fs'
 import { Socket, createServer } from './socket'
 import { checkPow } from './pow'
-import { withDir, DirectoryResult } from 'tmp-promise'
-import { promisify } from 'util'
-import { join } from 'path'
 import { Stream } from 'stream'
+import { pack } from 'tar-stream'
 import pLimit from 'p-limit'
 import Docker from 'dockerode'
 
@@ -13,7 +10,6 @@ const CodeLocation = '/data'
 const DockerTag = 'openjdk:8-alpine'
 const limit = pLimit(5)
 const docker = new Docker()
-const writeFile = promisify(writeFileAsync)
 
 function getStream(stream: Stream) {
   return new Promise<string>((resolve, reject) => {
@@ -25,7 +21,7 @@ function getStream(stream: Stream) {
   })
 }
 
-async function onConnection(socket: Socket, dir: DirectoryResult) {
+async function onConnection(socket: Socket) {
   await socket.writeline(`Welcome to c0 online demo!`)
   await socket.writeline(`Zero-featured TypeScript on JVM\n`)
   await socket.writeline(`You can input your code and see the result!`)
@@ -46,29 +42,28 @@ print('hello world')
   out = out.slice(0, size)
   await socket.writeline(`Compile complete, size: ${out.byteLength}`)
 
-  await writeFile(join(dir.path, 'Main.class'), out)
   if (limit.pendingCount > 0) {
     await socket.writeline('Queuing...')
   }
   await limit(async () => {
+    const tar = pack()
+    tar.entry({ name: 'Main.class' }, out)
+    tar.finalize()
+
     await socket.writeline('Running...')
     const c = await docker.createContainer({
       Image: DockerTag,
       Cmd: ['java', 'Main'],
       Env: [`FLAG=${process.env.FLAG}`],
       WorkingDir: CodeLocation,
-      Volumes: {
-        [CodeLocation]: {}
-      },
-      HostConfig: {
-        Binds: [`${dir.path}:${CodeLocation}`],
-        AutoRemove: true
-      },
+      Tty: true,
     })
+    await c.putArchive(tar, { path: CodeLocation })
     const stream = await c.attach({
       stream: true,
       stdout: true,
       stderr: true,
+      tty: true,
     })
     await c.start()
     await c.wait()
@@ -76,10 +71,6 @@ print('hello world')
     await socket.writeline(await getStream(stream))
   })
   await socket.writeline('Bye!')
-}
-
-function withTmpDir(cb: (socket: Socket, dir: DirectoryResult) => Promise<void>) {
-  return (socket: Socket) => withDir((dir) => cb(socket, dir), { unsafeCleanup: true })
 }
 
 function asyncWrapper(cb: (socket: Socket) => Promise<void>) {
@@ -107,7 +98,7 @@ async function main() {
     await docker.pull(DockerTag, {})
   }
   const server = createServer(
-    asyncWrapper(checkPow(withTmpDir(onConnection)))
+    asyncWrapper(checkPow(onConnection))
   )
   const host = process.env.HOST ?? '127.0.0.1'
   const port = process.env.PORT ?? '5000'

@@ -9,3 +9,6 @@ services:
       - "/var/run/docker.sock:/var/run/docker.sock"
     ports:
       - "5000:5000"
+    environment:
+      - "HOST=0.0.0.0"
+      - "FLAG=RCTF{utf8_is_am4zing}"

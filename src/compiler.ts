@@ -1,8 +1,5 @@
-import { createSourceFile, ScriptTarget, SyntaxKind, VariableStatement, Node, Identifier, StringLiteral, NumericLiteral, ExpressionStatement, CallExpression, Expression, BinaryExpression } from 'typescript'
-import { readFile as readFileAsync } from 'fs'
+import { createSourceFile, ScriptTarget, SyntaxKind, VariableStatement, Identifier, StringLiteral, NumericLiteral, ExpressionStatement, CallExpression, Expression, BinaryExpression } from 'typescript'
 import { equal } from 'assert'
-import { promisify } from 'util'
-const readFile = promisify(readFileAsync)
 
 enum ConstantKind {
   TAG_CLASS = 7,
