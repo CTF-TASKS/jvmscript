@@ -25,7 +25,7 @@ logConfigure({
   }
 })
 
-const Timeout = 1 * 1000 // 1s
+const Timeout = 5 * 1000 // 1s
 const CodeLocation = '/data'
 const DockerTag = 'openjdk:8-alpine'
 const limit = pLimit(5)
