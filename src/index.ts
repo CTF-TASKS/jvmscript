@@ -135,6 +135,9 @@ function loggerLayer(cb: (socket: Socket) => Promise<void>) {
 
 function asyncWrapper(cb: (socket: Socket) => Promise<void>) {
   return async (socket: Socket) => {
+    socket.s.on('error', err => {
+      errorLogger.error(`${socket.endpoint}`, err)
+    })
     try {
       await cb(socket)
     } catch (e) {
