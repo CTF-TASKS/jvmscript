@@ -161,7 +161,7 @@ class ConstantPool {
       switch (c.kind) {
         case ConstantKind.TAG_UTF8:
           offset = buffer.writeUInt16BE(c.str.length, offset)
-          offset += buffer.write(c.str, offset, 'utf8')
+          offset += buffer.write(c.str, offset, 'utf-8')
           break
         case ConstantKind.TAG_DOUBLE:
           offset = buffer.writeDoubleBE(c.num, offset)
@@ -201,17 +201,6 @@ class ClassInfo {
   main?: Buffer
   template = this.makeTemplate()
   constructor() {}
-  objectConstructor(methodRef: number) {
-    const buf = Buffer.from([
-      0x2a, // aload_0
-      0xb7, // invokespecial method_ref
-      0x00, // methodRef
-      0x00,
-      0xB1, // return
-    ])
-    buf.writeUInt16BE(methodRef, 2)
-    return buf
-  }
   makePrint() {
     const buf = Buffer.from([
       0xB2, // getstatic
@@ -259,15 +248,11 @@ class ClassInfo {
     const p = this.pool
     const thisClass = p.addClass(p.addString(this.thisClass))
     const superClass = p.addClass(p.addString(this.superClass))
-    const constructorNT = p.addNameAndType(p.addString('<init>'), p.addString('()V'))
-    const superRef = this.pool.addMethodRef(superClass, constructorNT)
-    const ctorMI = this.makeMethodInfo(AccessFlags.Public, '<init>', '()V', this.objectConstructor(superRef))
     const printMI = this.makeMethodInfo(AccessFlags.StaticPublic, 'print', '(Ljava/lang/String;)V', this.makePrint())
 
     return {
       thisClass,
       superClass,
-      ctorMI,
       printMI,
     }
   }
@@ -278,11 +263,10 @@ class ClassInfo {
     const {
       thisClass,
       superClass,
-      ctorMI,
       printMI,
     } = this.template
     const main = this.makeMethodInfo(AccessFlags.StaticPublic, 'main', '([Ljava/lang/String;)V', this.main)
-    const methods: Buffer[] = [ctorMI, printMI, main]
+    const methods: Buffer[] = [printMI, main]
 
     let offset = 0
     offset = buffer.writeUInt32BE(0xcafebabe, offset)

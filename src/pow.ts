@@ -15,10 +15,9 @@ function randomString(size: number, from: string = 'abcdefghijklmnopqrstuvwxyzAB
   return out
 }
 
-function generateChallenge(difficulty: number = 0.7) {
+function generateChallenge(difficulty: number = 16) {
   const full = randomString(20)
-  const p = Math.floor(full.length * difficulty)
-  const [display, hidden] = [full.slice(0, p), full.slice(p)]
+  const [display, hidden] = [full.slice(0, difficulty), full.slice(difficulty)]
   return [
     `sha256('${display}' + '${'?'.repeat(hidden.length)}') == '${sha256(full)}'`,
     hidden

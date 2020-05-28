@@ -28,7 +28,7 @@ function startContainerWithTimeout(container: Docker.Container) {
     setTimeout(() => {
       stop = true
       reject(new Error('Timeout'))
-      container.kill().catch(e => console.error(`Failed to kill ${container.id}`, e))
+      container.kill().catch(e => void 0)
     }, Timeout)
     try {
       const stream = await container.attach({
