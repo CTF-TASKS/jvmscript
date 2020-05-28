@@ -69,8 +69,9 @@ async function main() {
 function calcPow(challenge: string) {
   const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
   const [, prefix, missing, hash] = /sha256\('(.*?)'\s*\+\s*'(.*?)'\) == '(.*?)'/.exec(challenge)!
+  const total = Math.pow(chars.length, missing.length)
   let i = 0
-  while (i < Math.pow(chars.length, missing.length)) {
+  while (i < total) {
     let [, str] = missing.split('').reduce(([n, s]) => {
       return [n * chars.length, s + chars[Math.floor(i / n) % chars.length]] as [number, string]
     }, [1, ''] as [number, string])
@@ -78,8 +79,8 @@ function calcPow(challenge: string) {
       return str
     }
     i++
-    if (i % 100000 === 0) {
-      console.log(str, i, Math.pow(chars.length, missing.length))
+    if (i % 1000000 === 0) {
+      console.log(str, i, total, Math.floor(i / total * 100), '%')
     }
   }
   throw new Error('Not found')
@@ -88,7 +89,7 @@ function calcPow(challenge: string) {
 main().catch(e => console.error(e))
 
 let s = new NativeSocket()
-s.connect(5000, 'localhost', async () => {
+s.connect(5000, '124.156.133.68', async () => {
   const socket = new Socket(s)
   const challenge = await socket.readline()
   console.log('challenge', challenge)
@@ -102,8 +103,5 @@ s.connect(5000, 'localhost', async () => {
   }
   await socket.writeline('')
   await socket.writeline('')
-  while (true) {
-    const line = await socket.readline()
-    console.log(line)
-  }
+  socket.s.on('data', e => console.log(e.toString()))
 })
