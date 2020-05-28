@@ -3,3 +3,4 @@ dist/
 *.class
 *.java
 .env
+log/

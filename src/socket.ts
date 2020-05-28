@@ -32,4 +32,7 @@ export class Socket {
       res()
     })
   }
+  get endpoint() {
+    return `${this.s.remoteFamily}:${this.s.remoteAddress}:${this.s.remotePort}`
+  }
 }

@@ -1,5 +1,8 @@
 import { Socket } from './socket'
 import { createHash } from 'crypto'
+import { getLogger } from 'log4js'
+
+const logger = getLogger('server')
 
 function sha256(data: string): string {
   const hash = createHash('sha256')
@@ -29,8 +32,11 @@ export function checkPow(next: (socket: Socket) => Promise<void>) {
     const [ challenge, hidden ] = generateChallenge()
     console.log('challenge', challenge, hidden)
     await socket.writeline(challenge)
+    const start = Date.now()
     const ans = await socket.readline()
+    const end = Date.now()
     if (hidden === ans) {
+      logger.info(`${socket.endpoint} PoW costs ${end - start}ms`)
       return next(socket)
     } else {
       await socket.writeline(`Wrong answer, the answer is ${hidden}`)

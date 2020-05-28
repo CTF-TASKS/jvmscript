@@ -3,14 +3,35 @@ import { Socket, createServer } from './socket'
 import { checkPow } from './pow'
 import { Stream } from 'stream'
 import { pack } from 'tar-stream'
+import { configure as logConfigure, getLogger } from 'log4js'
+import { join } from 'path'
 import pLimit from 'p-limit'
 import Docker from 'dockerode'
+
+const LogPath = process.env.LOG_PATH || './log/'
+logConfigure({
+  appenders: {
+    access: { type: 'file', filename: join(LogPath, 'access.log') },
+    error: { type: 'file', filename: join(LogPath, 'error.log') },
+    code: { type: 'file', filename: join(LogPath, 'code.log') },
+    console: { type: 'console' },
+  },
+  categories: {
+    default: { appenders: ['access', 'console'], level: 'debug' },
+    server: { appenders: ['access'], level: 'debug' },
+    code: { appenders: ['code'], level: 'debug' },
+    error: { appenders: ['error'], level: 'debug' },
+  }
+})
 
 const Timeout = 1 * 1000 // 1s
 const CodeLocation = '/data'
 const DockerTag = 'openjdk:8-alpine'
 const limit = pLimit(5)
 const docker = new Docker()
+const logger = getLogger('server')
+const errorLogger = getLogger('error')
+const codeLogger = getLogger('code')
 
 function getStream(stream: Stream) {
   return new Promise<string>((resolve, reject) => {
@@ -62,9 +83,12 @@ print('hello world')
     if (line === '') break
     code.push(line)
   }
+  const codeStr = code.join('\n')
+  const codeBuf = Buffer.from(codeStr)
+  codeLogger.info(`${socket.endpoint} ${codeBuf.toString('hex')}`)
 
   let out = Buffer.alloc(8192)
-  const cls = compile(code.join('\n'))
+  const cls = compile(codeStr)
   const size = cls.write(out)
   out = out.slice(0, size)
   await socket.writeline(`Compile complete, size: ${out.byteLength}`)
@@ -96,12 +120,23 @@ print('hello world')
   await socket.writeline('Bye!')
 }
 
+function loggerLayer(cb: (socket: Socket) => Promise<void>) {
+  return async (socket: Socket) => {
+    const start = Date.now()
+    try {
+      await cb(socket)
+    } finally {
+      logger.info(`${socket.endpoint} disconnected ${Date.now() - start}ms`)
+    }
+  }
+}
+
 function asyncWrapper(cb: (socket: Socket) => Promise<void>) {
   return async (socket: Socket) => {
     try {
       await cb(socket)
     } catch (e) {
-      console.error(e)
+      errorLogger.error(socket.endpoint, e)
       await socket.writeline(`Error: ${e.message}`)
     } finally {
       await socket.close()
@@ -121,7 +156,7 @@ async function main() {
     await docker.pull(DockerTag, {})
   }
   const server = createServer(
-    asyncWrapper(checkPow(onConnection))
+    asyncWrapper(checkPow(loggerLayer(onConnection)))
   )
   const host = process.env.HOST ?? '127.0.0.1'
   const port = process.env.PORT ?? '5000'
