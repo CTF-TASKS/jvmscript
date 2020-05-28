@@ -6,6 +6,7 @@ import { pack } from 'tar-stream'
 import pLimit from 'p-limit'
 import Docker from 'dockerode'
 
+const Timeout = 1 * 1000 // 1s
 const CodeLocation = '/data'
 const DockerTag = 'openjdk:8-alpine'
 const limit = pLimit(5)
@@ -18,6 +19,32 @@ function getStream(stream: Stream) {
     stream.on('data', buf => out.push(buf))
     stream.on('end', end)
     stream.on('error', err => reject(err))
+  })
+}
+
+function startContainerWithTimeout(container: Docker.Container) {
+  return new Promise<string>(async (resolve, reject) => {
+    let stop = false
+    setTimeout(() => {
+      stop = true
+      reject(new Error('Timeout'))
+      container.kill().catch(e => console.error(`Failed to kill ${container.id}`, e))
+    }, Timeout)
+    try {
+      const stream = await container.attach({
+        stream: true,
+        stdout: true,
+        stderr: true,
+        tty: true,
+      })
+      await container.start()
+      if (stop) return
+      await container.wait()
+      resolve(getStream(stream))
+      if (stop) return
+    } catch(e) {
+      reject(e)
+    }
   })
 }
 
@@ -53,7 +80,7 @@ print('hello world')
     await socket.writeline('Running...')
     const c = await docker.createContainer({
       Image: DockerTag,
-      Cmd: ['java', 'Main'],
+      Cmd: ['java', 'Main', '-Xms32m', 'Xmx64m'],
       Env: [`FLAG=${process.env.FLAG}`],
       WorkingDir: CodeLocation,
       Tty: true,
@@ -62,16 +89,9 @@ print('hello world')
       },
     })
     await c.putArchive(tar, { path: CodeLocation })
-    const stream = await c.attach({
-      stream: true,
-      stdout: true,
-      stderr: true,
-      tty: true,
-    })
-    await c.start()
-    await c.wait()
+    const result = await startContainerWithTimeout(c)
     await socket.writeline('Result:')
-    await socket.writeline(await getStream(stream))
+    await socket.writeline(result)
   })
   await socket.writeline('Bye!')
 }
