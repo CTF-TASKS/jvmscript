@@ -14,13 +14,13 @@ logConfigure({
   appenders: {
     access: { type: 'file', filename: join(LogPath, 'access.log'), ...Rolling },
     error: { type: 'file', filename: join(LogPath, 'error.log'), ...Rolling },
-    code: { type: 'file', filename: join(LogPath, 'code.log'), ...Rolling },
+    io: { type: 'file', filename: join(LogPath, 'io.log'), ...Rolling },
     console: { type: 'console' },
   },
   categories: {
     default: { appenders: ['access', 'console'], level: 'debug' },
     server: { appenders: ['access'], level: 'debug' },
-    code: { appenders: ['code'], level: 'debug' },
+    io: { appenders: ['io'], level: 'debug' },
     error: { appenders: ['error'], level: 'debug' },
   }
 })
@@ -32,7 +32,7 @@ const limit = pLimit(5)
 const docker = new Docker()
 const logger = getLogger('server')
 const errorLogger = getLogger('error')
-const codeLogger = getLogger('code')
+const ioLogger = getLogger('io')
 
 function getStream(stream: Stream) {
   return new Promise<string>((resolve, reject) => {
@@ -85,8 +85,7 @@ print('hello world')
     code.push(line)
   }
   const codeStr = code.join('\n')
-  const codeBuf = Buffer.from(codeStr)
-  codeLogger.info(`${socket.endpoint} ${codeBuf.toString('hex')}`)
+  ioLogger.info(`${socket.endpoint} [code] ${codeStr}`)
 
   let out = Buffer.alloc(8192)
   const cls = compile(codeStr)
@@ -115,6 +114,7 @@ print('hello world')
     })
     await c.putArchive(tar, { path: CodeLocation })
     const result = await startContainerWithTimeout(c)
+    ioLogger.info(`${socket.endpoint} [result] ${result}`)
     await socket.writeline('Result:')
     await socket.writeline(result)
   })
