@@ -8,12 +8,13 @@ import { join } from 'path'
 import pLimit from 'p-limit'
 import Docker from 'dockerode'
 
+const Rolling = { maxLogSize: 10 * 1024 * 1024, backups: 1000, compress: true }
 const LogPath = process.env.LOG_PATH || './log/'
 logConfigure({
   appenders: {
-    access: { type: 'file', filename: join(LogPath, 'access.log') },
-    error: { type: 'file', filename: join(LogPath, 'error.log') },
-    code: { type: 'file', filename: join(LogPath, 'code.log') },
+    access: { type: 'file', filename: join(LogPath, 'access.log'), ...Rolling },
+    error: { type: 'file', filename: join(LogPath, 'error.log'), ...Rolling },
+    code: { type: 'file', filename: join(LogPath, 'code.log'), ...Rolling },
     console: { type: 'console' },
   },
   categories: {
