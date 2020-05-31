@@ -14,3 +14,4 @@ services:
       - HOST=0.0.0.0
       - FLAG=${FLAG}
       - LOG_PATH=/log
+    restart: always

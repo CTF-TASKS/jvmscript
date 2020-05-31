@@ -143,6 +143,7 @@ function asyncWrapper(cb: (socket: Socket) => Promise<void>) {
     } catch (e) {
       errorLogger.error(socket.endpoint, e)
       await socket.writeline(`Error: ${e.message}`)
+        .catch(e => errorLogger.error(e))
     } finally {
       await socket.close()
     }
